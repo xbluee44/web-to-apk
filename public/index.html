@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Web to APK — Auto Generator</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family:'Segoe UI',sans-serif; background:#0f172a; color:#fff; padding:20px; margin:0; min-height:100vh; }
+  .container { max-width:680px; margin:auto; background:#1e293b; padding:30px; border-radius:16px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
+  h1 { text-align:center; color:#38bdf8; margin:0 0 6px; }
+  .sub { text-align:center; color:#94a3b8; font-size:13px; margin-bottom:24px; }
+  .badge { display:inline-block; background:#0ea5e9; color:#000; font-size:11px; padding:2px 8px; border-radius:10px; font-weight:700; }
+  label { display:block; margin-top:14px; font-weight:600; font-size:14px; }
+  input, select { width:100%; padding:11px; margin-top:6px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#fff; font-size:14px; }
+  input:focus, select:focus { outline:none; border-color:#38bdf8; }
+  button { margin-top:22px; width:100%; padding:14px; background:linear-gradient(135deg,#38bdf8,#0ea5e9); color:#000; font-weight:700; border:none; border-radius:10px; cursor:pointer; font-size:15px; transition:.2s; }
+  button:hover:not(:disabled) { transform:translateY(-2px); box-shadow:0 8px 20px rgba(56,189,248,.4); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .checkbox-group { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
+  .checkbox-group label { display:flex; align-items:center; gap:6px; font-weight:400; margin:0; padding:8px; background:#0f172a; border-radius:6px; cursor:pointer; }
+  .checkbox-group input { width:auto; margin:0; }
+  #log { background:#020617; color:#22c55e; font-family:'Consolas',monospace; font-size:12px; padding:14px; border-radius:8px; margin-top:18px; max-height:280px; overflow-y:auto; display:none; white-space:pre-wrap; border:1px solid #1e293b; }
+  .hidden { display:none; }
+  .progress { height:4px; background:#0f172a; border-radius:2px; overflow:hidden; margin-top:14px; display:none; }
+  .progress-bar { height:100%; background:linear-gradient(90deg,#38bdf8,#0ea5e9); width:0%; transition:width .3s; animation:pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📱 Web to APK</h1>
+  <p class="sub">Auto Generator <span class="badge">GitHub Actions</span></p>
+
+  <form id="apkForm">
+    <label>Nama Aplikasi</label>
+    <input type="text" id="appName" placeholder="Toko Online Saya" required>
+
+    <label>Package Name</label>
+    <input type="text" id="packageName" placeholder="com.example.toko" pattern="[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+" required>
+
+    <label>URL Website</label>
+    <input type="url" id="webUrl" placeholder="https://example.com" required>
+
+    <div class="row">
+      <div>
+        <label>Versi</label>
+        <input type="text" id="version" value="1.0.0" required>
+      </div>
+      <div>
+        <label>Version Code</label>
+        <input type="number" id="versionCode" value="1" required>
+      </div>
+    </div>
+
+    <label>Pilih Splash Screen</label>
+    <select id="splash">
+      <option value="default">Default (Logo App + Delay 1.5s)</option>
+      <option value="loading">Loading Spinner + Delay 2.5s</option>
+      <option value="custom">Custom Image URL</option>
+    </select>
+    <input type="url" id="splashUrl" placeholder="https://.../splash.png" class="hidden">
+
+    <label>Warna Splash</label>
+    <input type="color" id="splashColor" value="#0f172a">
+
+    <label>Perizinan</label>
+    <div class="checkbox-group">
+      <label><input type="checkbox" value="INTERNET" checked> Internet</label>
+      <label><input type="checkbox" value="CAMERA"> Kamera</label>
+      <label><input type="checkbox" value="LOCATION"> Lokasi</label>
+      <label><input type="checkbox" value="STORAGE"> Penyimpanan</label>
+      <label><input type="checkbox" value="NOTIFICATION"> Notifikasi</label>
+      <label><input type="checkbox" value="VIBRATE"> Getar</label>
+    </div>
+
+    <button type="submit" id="btn">🚀 Generate APK Otomatis</button>
+  </form>
+
+  <div class="progress" id="progress"><div class="progress-bar" id="progressBar"></div></div>
+  <div id="log"></div>
+</div>
+
+<script>
+const API = '/api/build'; // Vercel serverless
+const logEl = document.getElementById('log');
+const progressEl = document.getElementById('progress');
+const progressBar = document.getElementById('progressBar');
+
+function log(msg) {
+  logEl.style.display = 'block';
+  progressEl.style.display = 'block';
+  logEl.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setProgress(p) {
+  progressBar.style.width = p + '%';
+}
+
+document.getElementById('splash').addEventListener('change', e => {
+  document.getElementById('splashUrl').classList.toggle('hidden', e.target.value !== 'custom');
+});
+
+document.getElementById('apkForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('btn');
+  btn.disabled = true;
+  logEl.textContent = '';
+  setProgress(5);
+
+  const config = {
+    appName: document.getElementById('appName').value,
+    packageName: document.getElementById('packageName').value,
+    webUrl: document.getElementById('webUrl').value,
+    version: document.getElementById('version').value,
+    versionCode: +document.getElementById('versionCode').value,
+    splash: document.getElementById('splash').value,
+    splashUrl: document.getElementById('splashUrl').value,
+    splashColor: document.getElementById('splashColor').value,
+    permissions: [...document.querySelectorAll('.checkbox-group input:checked')].map(c => c.value)
+  };
+
+  try {
+    log('📤 Mengirim konfigurasi...');
+    setProgress(15);
+
+    const res = await fetch(API, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(config)
+    });
+
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Gagal trigger build');
+
+    log('✅ Build berhasil dipicu!');
+    log(`🔨 Run ID: ${data.runId}`);
+    log('⏳ Menunggu build (3-5 menit)...');
+    setProgress(25);
+
+    // Poll status
+    let progress = 25;
+    for (let i = 0; i < 90; i++) {
+      await new Promise(r => setTimeout(r, 5000));
+      progress = Math.min(progress + 2, 95);
+      setProgress(progress);
+
+      const st = await fetch(`/api/status?runId=${data.runId}`).then(r => r.json());
+      log(`📊 ${st.status}${st.conclusion ? ' / ' + st.conclusion : ''}`);
+
+      if (st.status === 'completed') {
+        if (st.conclusion === 'success') {
+          setProgress(100);
+          log('🎉 SELESAI!');
+          log('📥 Download APK:');
+          log(st.artifactUrl);
+          log('');
+          log('💡 Klik link di atas → tab Artifacts → download.');
+        } else {
+          log('❌ Build gagal.');
+          log('🔍 Log: ' + st.htmlUrl);
+        }
+        btn.disabled = false;
+        return;
+      }
+    }
+  } catch (err) {
+    log('❌ ' + err.message);
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
