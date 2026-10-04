@@ -1,0 +1,78 @@
+name: Auto Build APK
+
+on:
+  repository_dispatch:
+    types: [build-apk]
+  workflow_dispatch:
+    inputs:
+      appName: { description: 'App Name', required: true, default: 'Demo App' }
+      packageName: { description: 'Package', required: true, default: 'com.demo.app' }
+      webUrl: { description: 'Web URL', required: true, default: 'https://example.com' }
+
+jobs:
+  generate-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 📥 Checkout repo
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: 📱 Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 🔧 Generate Android project
+        env:
+          BUILD_CONFIG: ${{ toJson(github.event.client_payload) }}
+        run: node generator/generate.js
+
+      - name: 🔑 Generate keystore
+        working-directory: android-project
+        run: |
+          keytool -genkeypair -v -keystore keystore.jks \
+            -storepass android -keypass android \
+            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=WebToApk, OU=Dev, O=WebToApk, L=ID, S=ID, C=ID"
+
+      - name: 🏗️ Build APK
+        working-directory: android-project
+        run: |
+          gradle wrapper --gradle-version 8.2
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: 📦 Rename APK
+        id: rename
+        run: |
+          NAME="${{ github.event.client_payload.appName }}"
+          [ -z "$NAME" ] && NAME="Demo_App"
+          SAFE=$(echo "$NAME" | tr ' ' '_' | tr -cd '[:alnum:]_-')
+          mkdir -p dist
+          cp android-project/app/build/outputs/apk/release/app-release.apk "dist/${SAFE}.apk"
+          echo "filename=${SAFE}.apk" >> $GITHUB_OUTPUT
+
+      - name: ⬆️ Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.rename.outputs.filename }}
+          path: dist/*.apk
+          retention-days: 30
+
+      - name: 📝 Summary
+        run: |
+          echo "## ✅ APK Build Success" >> $GITHUB_STEP_SUMMARY
+          echo "- **App Name:** ${{ github.event.client_payload.appName }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package:** ${{ github.event.client_payload.packageName }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL:** ${{ github.event.client_payload.webUrl }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **APK:** ${{ steps.rename.outputs.filename }}" >> $GITHUB_STEP_SUMMARY
